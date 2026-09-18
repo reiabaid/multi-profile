@@ -72,6 +72,38 @@ multiple names at once, e.g. `-Remove "Work","Personal"`.
 You can also do this manually: delete the shortcut and its folder under
 `%LOCALAPPDATA%\ClaudeProfiles`.
 
+## Using it as a module
+
+The actual create/list/remove logic lives in the `ClaudeAccountProfile`
+module (`ClaudeAccountProfile/ClaudeAccountProfile.psd1`); the top-level
+`New-ClaudeAccountProfile.ps1` script is a thin command-line wrapper around
+it. You can import the module directly for scripting/automation instead of
+using the script:
+
+```powershell
+Import-Module .\ClaudeAccountProfile\ClaudeAccountProfile.psd1
+
+New-ClaudeAccountProfile -AccountName "Work","Personal"
+Get-ClaudeAccountProfile
+Remove-ClaudeAccountProfile -AccountName "Work" -Confirm:$false
+```
+
+All three functions support `-WhatIf`/`-Confirm` (`SupportsShouldProcess`)
+and return `PSCustomObject`s describing what happened/exists, instead of
+just writing to the console.
+
+## Running the tests
+
+Tests are written for [Pester](https://pester.dev) 5+ (`Install-Module
+Pester -MinimumVersion 5.0 -Force -SkipPublisherCheck` if you don't have it):
+
+```powershell
+Invoke-Pester -Path .\ClaudeAccountProfile\ClaudeAccountProfile.Tests.ps1
+```
+
+They run entirely against a temporary `TestDrive` folder (no real Desktop
+shortcuts or `%LOCALAPPDATA%\ClaudeProfiles` entries are touched).
+
 ## Alternatives considered
 
 - **Session-snapshot switcher** (e.g. claude-account-switcher-style tools):

@@ -18,6 +18,10 @@
     Besides creating profiles, the script can also list existing profiles
     (-List) or remove them (-Remove).
 
+    This script is a thin command-line wrapper around the ClaudeAccountProfile
+    module (in the ClaudeAccountProfile subfolder), which can also be
+    installed and used directly via Import-Module for scripting/automation.
+
 .PARAMETER AccountName
     One or more short labels for the accounts, e.g. "Work", "Personal".
     Each gets its own profile folder and desktop shortcut. Names may not
@@ -88,150 +92,47 @@ param(
     [string]$ProfileRoot = (Join-Path $env:LOCALAPPDATA "ClaudeProfiles")
 )
 
-# Characters illegal in Windows filenames.
-$script:InvalidNameChars = '[\\/:*?"<>|]'
+Import-Module (Join-Path $PSScriptRoot "ClaudeAccountProfile\ClaudeAccountProfile.psd1") -Force
 
-function Test-ValidAccountName {
-    param([string]$Name)
-    return -not ($Name -match $script:InvalidNameChars)
-}
-
-function Get-ShortcutPath {
-    param([string]$Name)
-    $desktopPath = [Environment]::GetFolderPath("Desktop")
-    return Join-Path $desktopPath "Claude - $Name.lnk"
-}
-
-function Resolve-ClaudeExePath {
-    param([string]$Override)
-
-    if ($Override) {
-        if (Test-Path $Override) { return (Resolve-Path $Override).Path }
-        throw "No file found at -ClaudeExePath '$Override'."
-    }
-
-    $candidates = @(
-        (Join-Path $env:LOCALAPPDATA "AnthropicClaude\Claude.exe")
-    )
-
-    foreach ($candidate in $candidates) {
-        if (Test-Path $candidate) { return $candidate }
-    }
-
-    $startMenuShortcut = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Claude.lnk"
-    if (Test-Path $startMenuShortcut) {
-        $shell = New-Object -ComObject WScript.Shell
-        $target = $shell.CreateShortcut($startMenuShortcut).TargetPath
-        if ($target -and (Test-Path $target)) { return $target }
-    }
-
-    throw "Could not find Claude.exe automatically. Re-run with -ClaudeExePath '<full path to Claude.exe>'."
-}
-
-function Invoke-CreateProfiles {
-    foreach ($name in $AccountName) {
-        if (-not (Test-ValidAccountName $name)) {
-            Write-Warning "Skipping '$name': account names may not contain any of: \ / : * ? `" < > |"
-            continue
-        }
-    }
-
-    $validNames = $AccountName | Where-Object { Test-ValidAccountName $_ }
-    if (-not $validNames) {
-        Write-Warning "No valid account names given."
-        return
-    }
-
-    $exePath = Resolve-ClaudeExePath -Override $ClaudeExePath
-    $shell = New-Object -ComObject WScript.Shell
-
-    New-Item -ItemType Directory -Path $ProfileRoot -Force | Out-Null
-
-    foreach ($name in $validNames) {
-        $profileDir = Join-Path $ProfileRoot $name
-        $shortcutPath = Get-ShortcutPath -Name $name
-
-        $profileExists = Test-Path $profileDir
-        $shortcutExists = Test-Path $shortcutPath
-
-        if (($profileExists -or $shortcutExists) -and -not $Force) {
-            Write-Warning "Skipping '$name': already exists (use -Force to overwrite). $(if ($profileExists) { "Profile folder: $profileDir. " })$(if ($shortcutExists) { "Shortcut: $shortcutPath." })"
-            continue
-        }
-
-        New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
-
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $exePath
-        $shortcut.Arguments = "--user-data-dir=`"$profileDir`""
-        $shortcut.WorkingDirectory = Split-Path $exePath -Parent
-        $shortcut.IconLocation = $exePath
-        $shortcut.Description = "Claude Desktop - isolated profile for '$name'"
-        $shortcut.Save()
-
-        Write-Host "Created '$shortcutPath' -> profile data at '$profileDir'"
-    }
-
-    Write-Host ""
-    Write-Host "Done. Each shortcut above can be launched independently, and several"
-    Write-Host "can be open at the same time since each uses its own data folder."
-    Write-Host "Sign into a different account from each shortcut on first launch."
-}
-
-function Invoke-ListProfiles {
-    if (-not (Test-Path $ProfileRoot)) {
-        Write-Host "No profile root found at '$ProfileRoot'."
-        return
-    }
-
-    $profiles = Get-ChildItem -Path $ProfileRoot -Directory -ErrorAction SilentlyContinue
-    if (-not $profiles) {
-        Write-Host "No account profiles found under '$ProfileRoot'."
-        return
-    }
-
-    foreach ($profile in $profiles) {
-        $shortcutPath = Get-ShortcutPath -Name $profile.Name
-        $shortcutStatus = if (Test-Path $shortcutPath) { "shortcut present" } else { "shortcut MISSING" }
-        Write-Host "$($profile.Name) -> $($profile.FullName) (${shortcutStatus}: $shortcutPath)"
-    }
-}
-
-function Invoke-RemoveProfiles {
-    foreach ($name in $Remove) {
-        if (-not (Test-ValidAccountName $name)) {
-            Write-Warning "Skipping '$name': not a valid account name."
-            continue
-        }
-
-        $profileDir = Join-Path $ProfileRoot $name
-        $shortcutPath = Get-ShortcutPath -Name $name
-
-        if (Test-Path $shortcutPath) {
-            Remove-Item -Path $shortcutPath -Force
-            Write-Host "Removed shortcut '$shortcutPath'"
-        }
-        else {
-            Write-Host "No shortcut found at '$shortcutPath'"
-        }
-
-        if (Test-Path $profileDir) {
-            if ($PSCmdlet.ShouldProcess($profileDir, "Delete profile folder (contains session/login data)")) {
-                Remove-Item -Path $profileDir -Recurse -Force
-                Write-Host "Removed profile folder '$profileDir'"
-            }
-            else {
-                Write-Host "Skipped deleting profile folder '$profileDir'"
-            }
-        }
-        else {
-            Write-Host "No profile folder found at '$profileDir'"
-        }
-    }
-}
+# Forward -WhatIf/-Confirm to the module functions only if the caller explicitly
+# passed them (module functions live in their own session state, so the
+# $WhatIfPreference/$ConfirmPreference of this script's scope won't reach them
+# automatically).
+$shouldProcessParams = @{}
+if ($PSBoundParameters.ContainsKey('WhatIf')) { $shouldProcessParams.WhatIf = $PSBoundParameters['WhatIf'] }
+if ($PSBoundParameters.ContainsKey('Confirm')) { $shouldProcessParams.Confirm = $PSBoundParameters['Confirm'] }
 
 switch ($PSCmdlet.ParameterSetName) {
-    'List' { Invoke-ListProfiles }
-    'Remove' { Invoke-RemoveProfiles }
-    default { Invoke-CreateProfiles }
+    'List' {
+        $profiles = Get-ClaudeAccountProfile -ProfileRoot $ProfileRoot
+        if (-not $profiles) {
+            Write-Host "No account profiles found under '$ProfileRoot'."
+            break
+        }
+        foreach ($profile in $profiles) {
+            $shortcutStatus = if ($profile.ShortcutExists) { "shortcut present" } else { "shortcut MISSING" }
+            Write-Host "$($profile.Name) -> $($profile.ProfileDir) (${shortcutStatus}: $($profile.ShortcutPath))"
+        }
+    }
+
+    'Remove' {
+        foreach ($result in (Remove-ClaudeAccountProfile -AccountName $Remove -ProfileRoot $ProfileRoot @shouldProcessParams)) {
+            if ($result.ShortcutRemoved) { Write-Host "Removed shortcut for '$($result.Name)'" }
+            if ($result.ProfileDirRemoved) { Write-Host "Removed profile folder for '$($result.Name)'" }
+        }
+    }
+
+    default {
+        $results = New-ClaudeAccountProfile -AccountName $AccountName -Force:$Force -ClaudeExePath $ClaudeExePath -ProfileRoot $ProfileRoot @shouldProcessParams
+        foreach ($result in $results) {
+            if ($result.Created) {
+                Write-Host "Created '$($result.ShortcutPath)' -> profile data at '$($result.ProfileDir)'"
+            }
+        }
+
+        Write-Host ""
+        Write-Host "Done. Each shortcut above can be launched independently, and several"
+        Write-Host "can be open at the same time since each uses its own data folder."
+        Write-Host "Sign into a different account from each shortcut on first launch."
+    }
 }
