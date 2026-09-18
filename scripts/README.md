@@ -41,10 +41,36 @@ first time. After that, each shortcut remembers its own login.
   shortcut).
 - `-ProfileRoot <path>` - change where profile data folders are created
   (default: `%LOCALAPPDATA%\ClaudeProfiles`).
+- `-Force` - overwrite an existing profile folder and/or desktop shortcut for
+  an account name instead of warning and skipping it.
+
+Account names may not contain characters that are illegal in Windows
+filenames: `\ / : * ? " < > |`. By default, if a profile folder or shortcut
+already exists for a given name, the script warns and skips it rather than
+overwriting; pass `-Force` to overwrite anyway.
+
+## Listing accounts
+
+```powershell
+.\New-ClaudeAccountProfile.ps1 -List
+```
+
+Prints every account profile folder found under `-ProfileRoot` (default
+`%LOCALAPPDATA%\ClaudeProfiles`), along with whether its matching desktop
+shortcut still exists.
 
 ## Removing an account
 
-Delete its desktop shortcut and its folder under `%LOCALAPPDATA%\ClaudeProfiles`.
+```powershell
+.\New-ClaudeAccountProfile.ps1 -Remove "Work"
+```
+
+Deletes the account's desktop shortcut and prompts for confirmation before
+deleting its profile folder (since it holds session/login data). Accepts
+multiple names at once, e.g. `-Remove "Work","Personal"`.
+
+You can also do this manually: delete the shortcut and its folder under
+`%LOCALAPPDATA%\ClaudeProfiles`.
 
 ## Alternatives considered
 
